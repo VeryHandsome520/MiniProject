@@ -6,6 +6,8 @@ $device = $devRes->fetch_assoc();
 
 if (!$device)
     die("Device not found.");
+
+$isFull = ($device['device_type'] == 'FULL');
 ?>
 
 <!DOCTYPE html>
@@ -29,6 +31,11 @@ if (!$device)
                 <a href="index.php" class="btn btn-secondary btn-custom me-2">&larr; Back</a>
                 <h2 class="d-inline-block align-middle">
                     <?php echo htmlspecialchars($device['name']); ?>
+                    <?php if ($isFull): ?>
+                        <span class="badge bg-success">FULL</span>
+                    <?php else: ?>
+                        <span class="badge bg-secondary">BASIC</span>
+                    <?php endif; ?>
                     <button class="btn btn-sm btn-outline-secondary ms-2"
                         onclick="renameDevice(<?php echo $device_id; ?>, '<?php echo addslashes($device['name']); ?>')">✏️</button>
                 </h2>
@@ -40,6 +47,49 @@ if (!$device)
                     Graph 📊</a>
             </div>
         </div>
+
+        <?php if ($isFull): ?>
+        <!-- การ์ดแสดงข้อมูลเซนเซอร์ -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="text-muted small text-uppercase fw-bold">💡 Light Level</h6>
+                        <h2 id="sensorLight" class="mb-0">--</h2>
+                        <small class="text-muted">/ 4095</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="text-muted small text-uppercase fw-bold">⚡ Voltage</h6>
+                        <h2 id="sensorVoltage" class="mb-0">--</h2>
+                        <small class="text-muted">Volts</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="text-muted small text-uppercase fw-bold">🌙 Auto Light Mode</h6>
+                        <div class="form-check form-switch d-flex justify-content-center mt-2">
+                            <input class="form-check-input" type="checkbox" id="lightAutoToggle"
+                                <?php echo ($device['light_auto_mode'] == 'ON') ? 'checked' : ''; ?>
+                                onchange="setLightAuto(<?php echo $device_id; ?>, this.checked)">
+                        </div>
+                        <div class="input-group input-group-sm mt-2">
+                            <span class="input-group-text">Threshold</span>
+                            <input type="number" class="form-control" id="lightThreshold"
+                                value="<?php echo $device['light_threshold']; ?>" min="0" max="4095">
+                            <button class="btn btn-outline-primary btn-sm"
+                                onclick="setLightAuto(<?php echo $device_id; ?>, document.getElementById('lightAutoToggle').checked)">Set</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <div class="row" id="pinContainer">
             <?php
@@ -66,7 +116,7 @@ if (!$device)
 
                             <hr class="opacity-25">
                             
-                            <!-- Timer -->
+                            <!-- ตั้งเวลา -->
                             <h6 class="text-uppercase text-muted small fw-bold">Schedule</h6>
                             <div class="input-group mb-2">
                                 <input type="time" class="form-control form-control-sm" id="on_' . $p . '" value="' . $pin['timer_on'] . '">
@@ -75,7 +125,7 @@ if (!$device)
                                 <button class="btn btn-outline-primary btn-sm" onclick="setTimer(' . $device_id . ', ' . $p . ')">Set</button>
                             </div>
                             
-                            <!-- Duration -->
+                            <!-- นับเวลาถอยหลัง -->
                             <h6 class="text-uppercase text-muted small fw-bold mt-3">Timer (Minutes)</h6>
                             <div class="input-group">
                                 <input type="number" class="form-control form-control-sm" id="dur_' . $p . '" placeholder="Min">
@@ -92,7 +142,7 @@ if (!$device)
         </div>
     </div>
 
-    <!-- Add Pin Modal -->
+    <!-- หน้าต่างเพิ่ม Pin -->
     <div class="modal fade" id="addPinModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -102,7 +152,7 @@ if (!$device)
                 </div>
                 <div class="modal-body">
                     <div class="mb-3">
-                        <label>GPIO Number (e.g., 2, 4, 13)</label>
+                        <label>GPIO Number (e.g., 4, 5, 13)</label>
                         <input type="number" id="newPinNum" class="form-control">
                     </div>
                 </div>
@@ -115,7 +165,7 @@ if (!$device)
     </div>
 
     <script>
-        // --- Pin Management ---
+        // --- จัดการ Pin ---
         function togglePin(did, pin, checked) {
             let state = checked ? 'ON' : 'OFF';
             $.post('api_control.php', { action: 'toggle', device_id: did, pin: pin, state: state }, function (res) {
@@ -165,6 +215,29 @@ if (!$device)
                 if (res.status == 'ok') location.reload();
             });
         }
+
+        // --- โหมดไฟอัตโนมัติ ---
+        function setLightAuto(did, enabled) {
+            let mode = enabled ? 'ON' : 'OFF';
+            let threshold = $('#lightThreshold').val() || 500;
+            $.post('api_control.php', { action: 'set_light_auto', device_id: did, mode: mode, threshold: threshold }, function (res) {
+                if (res.status !== 'ok') alert(res.message);
+            });
+        }
+
+        <?php if ($isFull): ?>
+        // --- รีเฟรชข้อมูลเซนเซอร์อัตโนมัติ ---
+        function loadSensorData() {
+            $.getJSON('api_sensor.php?device_id=<?php echo $device_id; ?>&range=1h', function (data) {
+                if (data.latest) {
+                    $('#sensorLight').text(data.latest.light_level);
+                    $('#sensorVoltage').text(data.latest.voltage + 'V');
+                }
+            });
+        }
+        loadSensorData();
+        setInterval(loadSensorData, 15000); // รีเฟรชทุก 15 วินาที
+        <?php endif; ?>
     </script>
 
     <?php renderThemeBody(); ?>

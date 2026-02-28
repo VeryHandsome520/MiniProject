@@ -1,4 +1,5 @@
 <?php
+// ฟังก์ชันแสดง CSS และฟอนต์ของธีม
 function renderThemeHead()
 {
     ?>
@@ -20,7 +21,7 @@ function renderThemeHead()
             transition: background-color 0.3s, color 0.3s;
         }
 
-        /* Shared Card Styles */
+        /* สไตล์การ์ดที่ใช้ร่วมกัน */
         .card {
             background-color: var(--card-bg);
             border: none;
@@ -45,7 +46,7 @@ function renderThemeHead()
             font-weight: 500;
         }
 
-        /* Floating Settings Button */
+        /* ปุ่มตั้งค่าลอยตัว */
         .settings-btn {
             position: fixed;
             bottom: 30px;
@@ -70,7 +71,7 @@ function renderThemeHead()
             transform: scale(1.1);
         }
 
-        /* Modal Customization */
+        /* ปรับแต่งหน้าต่าง Modal */
         .modal-content {
             background-color: var(--card-bg);
             color: var(--text-color);
@@ -89,13 +90,14 @@ function renderThemeHead()
     <?php
 }
 
+// ฟังก์ชันแสดงปุ่มตั้งค่าธีมและ Modal
 function renderThemeBody()
 {
     ?>
-    <!-- Settings Button -->
+    <!-- ปุ่มตั้งค่า -->
     <button class="settings-btn" data-bs-toggle="modal" data-bs-target="#settingsModal">⚙️</button>
 
-    <!-- Settings Modal -->
+    <!-- หน้าต่างตั้งค่าธีม -->
     <div class="modal fade" id="settingsModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -133,9 +135,10 @@ function renderThemeBody()
     </div>
 
     <script>
-        // --- Theme Management Logic ---
+        // --- ลอจิกจัดการธีม ---
         const root = document.documentElement;
 
+        // ใช้ธีมที่บันทึกไว้
         function applyTheme() {
             const savedTheme = JSON.parse(localStorage.getItem('themeSettings'));
             if (savedTheme) {
@@ -144,7 +147,7 @@ function renderThemeBody()
                 root.style.setProperty('--text-color', savedTheme.text);
                 root.style.setProperty('--font-size-base', savedTheme.font + 'px');
 
-                // Update inputs if they exist on page
+                // อัปเดต input ถ้ามีในหน้า
                 if (document.getElementById('bgColorPicker')) {
                     document.getElementById('bgColorPicker').value = savedTheme.bg;
                     document.getElementById('cardColorPicker').value = savedTheme.card;
@@ -155,6 +158,7 @@ function renderThemeBody()
             }
         }
 
+        // บันทึกธีมลง localStorage
         function saveTheme() {
             const theme = {
                 bg: document.getElementById('bgColorPicker').value,
@@ -166,12 +170,13 @@ function renderThemeBody()
             applyTheme();
         }
 
+        // รีเซ็ตธีมเป็นค่าเริ่มต้น
         function resetTheme() {
             localStorage.removeItem('themeSettings');
             location.reload();
         }
 
-        // Attach Listeners if inputs exist
+        // ผูก Event Listener ถ้ามี input ในหน้า
         document.addEventListener('DOMContentLoaded', function () {
             const ids = ['bgColorPicker', 'cardColorPicker', 'textColorPicker'];
             ids.forEach(id => {

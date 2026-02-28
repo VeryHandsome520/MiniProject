@@ -1,6 +1,7 @@
 <?php
 include_once 'config.php';
 
+// ฟังก์ชันส่งข้อความแจ้งเตือนผ่าน Telegram Bot
 function sendTelegram($message)
 {
     $url = "https://api.telegram.org/bot" . TELEGRAM_TOKEN . "/sendMessage";

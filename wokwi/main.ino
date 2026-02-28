@@ -10,6 +10,8 @@
 String serverUrl = "http://smartbot-ai.com/3R/Earth/api_device.php";
 const String API_KEY = "smartbot-default-key-2026";
 const String DEVICE_TYPE = "FULL"; // บอร์ดนี้มีเซนเซอร์
+const char* ssid = "YOUR_SSID";   // ใส่ SSID ของคุณ
+const char* password = "YOUR_PASSWORD"; // ใส่รหัสผ่าน WiFi ของคุณ
 
 // ==================== ขา GPIO ====================
 // ขาเซนเซอร์ (อินพุต - ADC)
@@ -104,7 +106,7 @@ void EdgeComputingTask(void *pvParameters) {
     if (lightAutoMode) {
       // ถ้ามืด (ค่าแสงต่ำกว่าเกณฑ์) -> เปิดขาเอาต์พุตทั้งหมด
       // ถ้าสว่าง -> ปิด
-      bool shouldBeOn = (lightLevel > lightThreshold);
+      bool shouldBeOn = (lightLevel < lightThreshold);
       for (int i = 0; i < kPinCount; i++) {
         // ในโหมดไฟอัตโนมัติ จะควบคุมขาเอาต์พุตทั้งหมด
         digitalWrite(kOutputPins[i], shouldBeOn ? HIGH : LOW);
@@ -195,8 +197,7 @@ void NetworkTask(void *pvParameters) {
             // อัปเดตโหมดไฟอัตโนมัติจากเซิร์ฟเวอร์
             if (resDoc.containsKey("light_auto_mode")) {
               lightAutoMode =
-                  (String(resDoc["light_auto_mode"].as<const char *>()) ==
-                   "ON");
+                  (String(resDoc["light_auto_mode"].as<const char*>()) == "ON");
             }
             if (resDoc.containsKey("light_threshold")) {
               lightThreshold = resDoc["light_threshold"].as<int>();
@@ -277,20 +278,17 @@ void setup() {
   ledMode = 0; // กะพริบเร็วระหว่างเชื่อมต่อ
   xTaskCreate(StatusLedTask, "LedTask", 1024, NULL, 1, NULL);
 
-  // WiFiManager - หน้าตั้งค่าแทนการกำหนด SSID ตายตัว
-  WiFiManager wm;
-  wm.setConfigPortalTimeout(180); // หมดเวลา 3 นาที
-  wm.setAPStaticIPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1),
-                         IPAddress(255, 255, 255, 0));
-
-  Serial.println("[WiFi] Starting WiFiManager...");
-  if (!wm.autoConnect("SmartBot-Setup")) {
-    Serial.println("[WiFi] Failed to connect. Running in offline mode.");
-    ledMode = 2; // กะพริบช้า - ออฟไลน์
-  } else {
-    Serial.println("[WiFi] Connected!");
-    ledMode = 1; // ติดค้าง - เชื่อมต่อสำเร็จ
+  // Connect to Wi‑Fi using provided credentials
+  WiFi.begin(ssid, password);
+  Serial.print("[WiFi] Connecting...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print('.');
   }
+  Serial.println();
+  Serial.print("[WiFi] Connected! IP: ");
+  Serial.println(WiFi.localIP());
+  ledMode = 1; // ติดค้าง - เชื่อมต่อสำเร็จ
 
   macAddress = WiFi.macAddress();
   Serial.println("MAC: " + macAddress);

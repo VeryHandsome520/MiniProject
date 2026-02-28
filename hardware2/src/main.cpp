@@ -1,21 +1,15 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
-#include <Preferences.h>
 #include <WiFi.h>
 #include <WiFiManager.h>
-
 
 // ==================== ตั้งค่าระบบ ====================
 String serverUrl = "http://smartbot-ai.com/3R/Earth/api_device.php";
 const String API_KEY = "smartbot-default-key-2026";
-const String DEVICE_TYPE = "FULL"; // บอร์ดนี้มีเซนเซอร์
+const String DEVICE_TYPE = "BASIC"; // บอร์ดนี้ไม่มีเซนเซอร์
 
 // ==================== ขา GPIO ====================
-// ขาเซนเซอร์ (อินพุต - ADC)
-const int PIN_LDR = 34;     // เซนเซอร์แสง (LDR)
-const int PIN_VOLTAGE = 35; // เซนเซอร์แรงดันไฟฟ้า MAX471
-
 // LED แสดงสถานะ
 const int PIN_STATUS_LED = 2; // LED บนบอร์ด
 
@@ -26,15 +20,6 @@ const int kPinCount = sizeof(kOutputPins) / sizeof(kOutputPins[0]);
 
 // ==================== ตัวแปรสถานะ ====================
 String macAddress;
-Preferences preferences;
-
-// ค่าเซนเซอร์
-volatile int lightLevel = 0;
-volatile float voltage = 0.0;
-
-// สถานะ Edge Computing (แคชจากเซิร์ฟเวอร์)
-volatile bool lightAutoMode = false;
-volatile int lightThreshold = 500;
 volatile bool isOnline = false;
 
 // แคช Timer/Duration สำหรับ Edge Computing
@@ -42,17 +27,14 @@ struct PinState {
   int pin;
   String mode;  // "MANUAL", "TIMER", "DURATION"
   String state; // "ON", "OFF"
-  String timerOn;
-  String timerOff;
-  unsigned long durationEndMillis; // นับเวลาด้วย millis สำหรับโหมดออฟไลน์
+  unsigned long durationEndMillis;
   bool hasDuration;
 };
 PinState cachedPins[20];
 int cachedPinCount = 0;
 
 // ==================== LED แสดงสถานะ ====================
-volatile int ledMode =
-    0; // 0=กะพริบเร็ว (กำลังเชื่อมต่อ), 1=ติดค้าง (เชื่อมต่อแล้ว), 2=กะพริบช้า (ออฟไลน์)
+volatile int ledMode = 0; // 0=กะพริบเร็ว, 1=ติดค้าง, 2=กะพริบช้า
 
 void StatusLedTask(void *pvParameters) {
   pinMode(PIN_STATUS_LED, OUTPUT);
@@ -78,46 +60,11 @@ void StatusLedTask(void *pvParameters) {
   }
 }
 
-// ==================== อ่านค่าเซนเซอร์ ====================
-void SensorTask(void *pvParameters) {
-  while (1) {
-    // อ่านค่า LDR (0-4095, ยิ่งสูง = ยิ่งสว่าง)
-    lightLevel = analogRead(PIN_LDR);
-
-    // อ่านค่าแรงดันไฟฟ้าจาก MAX471
-    // MAX471: แรงดันขาออกแปรผันตามแรงดันที่วัดได้
-    // ADC: 0-4095 แมปเป็น 0-3.3V, คูณตัวคูณแปลงเป็นแรงดันจริง
-    int rawVoltage = analogRead(PIN_VOLTAGE);
-    voltage = (rawVoltage / 4095.0) * 3.3 *
-              5.0; // ตัวคูณสำหรับ MAX471 (ปรับได้ตามต้องการ)
-
-    Serial.printf("[Sensor] Light: %d, Voltage: %.2fV\n", lightLevel, voltage);
-
-    vTaskDelay(5000 / portTICK_PERIOD_MS); // อ่านค่าทุก 5 วินาที
-  }
-}
-
 // ==================== Edge Computing ====================
 void EdgeComputingTask(void *pvParameters) {
   while (1) {
-    // --- โหมดไฟอัตโนมัติ (ทำงานได้แม้ออฟไลน์) ---
-    if (lightAutoMode) {
-      // ถ้ามืด (ค่าแสงต่ำกว่าเกณฑ์) -> เปิดขาเอาต์พุตทั้งหมด
-      // ถ้าสว่าง -> ปิด
-      bool shouldBeOn = (lightLevel > lightThreshold);
-      for (int i = 0; i < kPinCount; i++) {
-        // ในโหมดไฟอัตโนมัติ จะควบคุมขาเอาต์พุตทั้งหมด
-        digitalWrite(kOutputPins[i], shouldBeOn ? HIGH : LOW);
-      }
-      if (!isOnline) {
-        Serial.printf("[Edge] Auto-Light: light=%d, threshold=%d -> %s\n",
-                      lightLevel, lightThreshold, shouldBeOn ? "ON" : "OFF");
-      }
-    }
-
-    // --- Timer/Duration ออฟไลน์ (Edge Computing) ---
-    if (!isOnline && !lightAutoMode) {
-      // ใช้ค่าแคชของ Pin สำหรับลอจิกตั้งเวลา
+    // ประมวลผล Timer/Duration ขณะออฟไลน์
+    if (!isOnline) {
       unsigned long nowMillis = millis();
 
       for (int i = 0; i < cachedPinCount; i++) {
@@ -138,7 +85,7 @@ void EdgeComputingTask(void *pvParameters) {
       }
     }
 
-    vTaskDelay(1000 / portTICK_PERIOD_MS); // ตรวจสอบทุก 1 วินาที
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 }
 
@@ -161,13 +108,11 @@ void NetworkTask(void *pvParameters) {
       http.setConnectTimeout(10000);
       http.setTimeout(10000);
 
-      // สร้าง JSON payload พร้อมข้อมูลเซนเซอร์
+      // สร้าง JSON payload (ไม่มีข้อมูลเซนเซอร์สำหรับบอร์ด BASIC)
       StaticJsonDocument<256> doc;
       doc["mac"] = macAddress;
       doc["ip"] = WiFi.localIP().toString();
       doc["device_type"] = DEVICE_TYPE;
-      doc["light"] = lightLevel;
-      doc["voltage"] = voltage;
 
       String jsonPayload;
       serializeJson(doc, jsonPayload);
@@ -191,43 +136,27 @@ void NetworkTask(void *pvParameters) {
           StaticJsonDocument<1024> resDoc;
           DeserializationError error = deserializeJson(resDoc, response);
 
-          if (!error) {
-            // อัปเดตโหมดไฟอัตโนมัติจากเซิร์ฟเวอร์
-            if (resDoc.containsKey("light_auto_mode")) {
-              lightAutoMode =
-                  (String(resDoc["light_auto_mode"].as<const char *>()) ==
-                   "ON");
-            }
-            if (resDoc.containsKey("light_threshold")) {
-              lightThreshold = resDoc["light_threshold"].as<int>();
-            }
+          if (!error && resDoc.containsKey("commands")) {
+            JsonObject commands = resDoc["commands"];
+            cachedPinCount = 0;
 
-            // ประมวลผลคำสั่ง Pin
-            if (resDoc.containsKey("commands")) {
-              JsonObject commands = resDoc["commands"];
-              cachedPinCount = 0;
+            for (int i = 0; i < kPinCount; i++) {
+              int pin = kOutputPins[i];
+              String pinStr = String(pin);
 
-              for (int i = 0; i < kPinCount; i++) {
-                int pin = kOutputPins[i];
-                String pinStr = String(pin);
+              if (commands.containsKey(pinStr)) {
+                String cmd = commands[pinStr].as<String>();
 
-                if (commands.containsKey(pinStr)) {
-                  String cmd = commands[pinStr].as<String>();
+                if (cmd == "ON")
+                  digitalWrite(pin, HIGH);
+                if (cmd == "OFF")
+                  digitalWrite(pin, LOW);
 
-                  // ควบคุม GPIO เฉพาะเมื่อไม่ได้อยู่ในโหมดไฟอัตโนมัติ
-                  if (!lightAutoMode) {
-                    if (cmd == "ON")
-                      digitalWrite(pin, HIGH);
-                    if (cmd == "OFF")
-                      digitalWrite(pin, LOW);
-                  }
-
-                  // แคชไว้สำหรับ Edge Computing
-                  if (cachedPinCount < 20) {
-                    cachedPins[cachedPinCount].pin = pin;
-                    cachedPins[cachedPinCount].state = cmd;
-                    cachedPinCount++;
-                  }
+                // แคชไว้สำหรับ Edge Computing
+                if (cachedPinCount < 20) {
+                  cachedPins[cachedPinCount].pin = pin;
+                  cachedPins[cachedPinCount].state = cmd;
+                  cachedPinCount++;
                 }
               }
             }
@@ -244,13 +173,13 @@ void NetworkTask(void *pvParameters) {
     } else {
       failCount = 10;
       isOnline = false;
-      ledMode = 2; // กะพริบช้า - ออฟไลน์
+      ledMode = 2;
     }
 
     // เชื่อมต่อ WiFi ใหม่ถ้าล้มเหลวหลายครั้ง
     if (failCount >= 3) {
       isOnline = false;
-      ledMode = 2; // กะพริบช้า
+      ledMode = 2;
       Serial.println("[WiFi] Too many failures. Reconnecting WiFi...");
       WiFi.disconnect();
       WiFi.reconnect();
@@ -258,14 +187,14 @@ void NetworkTask(void *pvParameters) {
       vTaskDelay(5000 / portTICK_PERIOD_MS);
     }
 
-    vTaskDelay(15000 / portTICK_PERIOD_MS); // ส่งข้อมูลทุก 15 วินาที
+    vTaskDelay(15000 / portTICK_PERIOD_MS);
   }
 }
 
 // ==================== ตั้งค่าเริ่มต้น ====================
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n=== SmartBot IoT - Hardware (FULL) ===");
+  Serial.println("\n=== SmartBot IoT - Hardware2 (BASIC) ===");
 
   // ตั้งค่าขาเอาต์พุตทั้งหมด
   for (int i = 0; i < kPinCount; i++) {
@@ -273,30 +202,29 @@ void setup() {
     digitalWrite(kOutputPins[i], LOW);
   }
 
-  // Task LED แสดงสถานะ (เริ่มทันทีด้วยกะพริบเร็ว)
-  ledMode = 0; // กะพริบเร็วระหว่างเชื่อมต่อ
+  // Task LED แสดงสถานะ
+  ledMode = 0;
   xTaskCreate(StatusLedTask, "LedTask", 1024, NULL, 1, NULL);
 
-  // WiFiManager - หน้าตั้งค่าแทนการกำหนด SSID ตายตัว
+  // WiFiManager - หน้าตั้งค่า WiFi
   WiFiManager wm;
-  wm.setConfigPortalTimeout(180); // หมดเวลา 3 นาที
+  wm.setConfigPortalTimeout(180);
   wm.setAPStaticIPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1),
                          IPAddress(255, 255, 255, 0));
 
   Serial.println("[WiFi] Starting WiFiManager...");
-  if (!wm.autoConnect("SmartBot-Setup")) {
+  if (!wm.autoConnect("SmartBot2-Setup")) {
     Serial.println("[WiFi] Failed to connect. Running in offline mode.");
-    ledMode = 2; // กะพริบช้า - ออฟไลน์
+    ledMode = 2;
   } else {
     Serial.println("[WiFi] Connected!");
-    ledMode = 1; // ติดค้าง - เชื่อมต่อสำเร็จ
+    ledMode = 1;
   }
 
   macAddress = WiFi.macAddress();
   Serial.println("MAC: " + macAddress);
 
   // สร้าง FreeRTOS Tasks
-  xTaskCreate(SensorTask, "SensorTask", 2048, NULL, 1, NULL);
   xTaskCreate(EdgeComputingTask, "EdgeTask", 4096, NULL, 1, NULL);
   xTaskCreate(NetworkTask, "NetTask", 8192, NULL, 1, NULL);
 }

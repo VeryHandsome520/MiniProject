@@ -8,13 +8,13 @@ $action = $_POST['action'] ?? '';
 $device_id = $_POST['device_id'] ?? 0;
 $pin = $_POST['pin'] ?? 0;
 
-// Get Device Name for Notifications
+// ดึงชื่ออุปกรณ์สำหรับแจ้งเตือน
 $devRes = $conn->query("SELECT name, mac_address FROM devices WHERE id='$device_id'");
 $devRow = $devRes->fetch_assoc();
 $devName = $devRow ? $devRow['name'] : "Unknown ($device_id)";
 
 if ($action == 'toggle') {
-    $state = $_POST['state']; // ON or OFF
+    $state = $_POST['state']; // ON หรือ OFF
     $sql = "UPDATE device_pins SET mode='MANUAL', state='$state', duration_end=NULL WHERE device_id='$device_id' AND pin_number='$pin'";
     if ($conn->query($sql)) {
         sendTelegram("🔧 <b>Manual Control</b>\nBoard: $devName\nPin: $pin\nSet to: <b>$state</b>");
@@ -39,10 +39,10 @@ if ($action == 'toggle') {
     }
 }
 
-// --- New Pin Management Actions ---
+// --- การจัดการ Pin เพิ่มเติม ---
 else if ($action == 'add_pin') {
     $pin = (int) $_POST['pin'];
-    // Check if exists
+    // ตรวจสอบว่า Pin มีอยู่แล้วหรือไม่
     $check = $conn->query("SELECT id FROM device_pins WHERE device_id='$device_id' AND pin_number='$pin'");
     if ($check->num_rows > 0) {
         echo json_encode(["status" => "error", "message" => "Pin already exists!"]);
@@ -67,6 +67,16 @@ else if ($action == 'add_pin') {
         echo json_encode(["status" => "ok"]);
     else
         echo json_encode(["status" => "error", "message" => $conn->error]);
+} else if ($action == 'set_light_auto') {
+    $mode = ($_POST['mode'] == 'ON') ? 'ON' : 'OFF';
+    $threshold = isset($_POST['threshold']) ? (int) $_POST['threshold'] : 500;
+    $sql = "UPDATE devices SET light_auto_mode='$mode', light_threshold=$threshold WHERE id='$device_id'";
+    if ($conn->query($sql)) {
+        sendTelegram("💡 <b>Auto Light " . ($mode == 'ON' ? 'Enabled' : 'Disabled') . "</b>\nBoard: $devName\nThreshold: $threshold");
+        echo json_encode(["status" => "ok"]);
+    } else {
+        echo json_encode(["status" => "error", "message" => $conn->error]);
+    }
 }
 
 $conn->close();
